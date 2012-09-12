@@ -1,7 +1,4 @@
-SRCS=	lexconf.l parseconf.y buildmanager.c
+SUBDIR+=	external
+SUBDIR+=	buildmanager
 
-PROG=	buildmanager
-
-NO_MAN=	yes
-
-.include <bsd.prog.mk>
+.include <bsd.subdir.mk>
