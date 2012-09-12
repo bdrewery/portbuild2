@@ -1,3 +1,4 @@
+#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/event.h>
 #include <sys/time.h>
@@ -13,9 +14,25 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "buildmanager.h"
+#include <yaml.h>
+#include <uthash.h>
 
-struct bm_conf conf;
+struct bm_conf {
+	char cmdsocket[MAXPATHLEN];
+	char datadir[MAXPATHLEN];
+	int cmdfd;
+	int pkgbuild_timeout;
+	int preparing_timeout;
+	char *nodehost;
+	char *nodeport;
+	int nodefd;
+} conf;
+
+struct local_cmd {
+};
+
+struct node_cmd {
+};
 
 static void
 close_socket(int dummy) {
@@ -27,6 +44,91 @@ close_socket(int dummy) {
 	exit(EXIT_SUCCESS);
 }
 
+static void
+parse_configuration(yaml_document_t *doc, yaml_node_t *node)
+{
+	yaml_node_pair_t *pair;
+
+	pair = node->data.mapping.pairs.start;
+	while (pair < node->data.mapping.pairs.top) {
+		yaml_node_t *key = yaml_document_get_node(doc, pair->key);
+		yaml_node_t *val = yaml_document_get_node(doc, pair->value);
+
+		if (key->data.scalar.length <= 0) {
+			/*
+			 * ignoring silently empty keys (empty lines or user
+			 * mistakes
+			 */
+			++pair;
+			continue;
+		}
+		if (val->type == YAML_NO_NODE ||
+		    (val->type == YAML_SCALAR_NODE &&
+		     val->data.scalar.length <= 0)) {
+			/*
+			 * silently skip on purpose to allow user to leave
+			 * empty lines for examples without complaining
+			 */
+			++pair;
+			continue;
+		}
+		if (strcasecmp((char *)key->data.scalar.value, "cmd_socket") == 0) {
+			if (val->type != YAML_SCALAR_NODE)
+				err(EXIT_FAILURE, "expecting a string for cmd_socket key");
+
+			strlcpy(conf.cmdsocket, (char *)val->data.scalar.value, sizeof(conf.cmdsocket));
+		} else if (strcasecmp((char *)key->data.scalar.value, "data_dir") == 0) {
+			if (val->type != YAML_SCALAR_NODE)
+				err(EXIT_FAILURE, "expecting a string for data_dir key");
+
+			strlcpy(conf.datadir, (char *)val->data.scalar.value, sizeof(conf.datadir));
+		} else if (strcasecmp((char *)key->data.scalar.value, "pkgbuild_timeout") == 0) {
+			if (val->type != YAML_SCALAR_NODE)
+				errx(EXIT_FAILURE, "expecting a string for pkgbuild_timeout key");
+		} else if (strcasecmp((char *)key->data.scalar.value, "preparing_timeout") == 0) {
+			if (val->type != YAML_SCALAR_NODE)
+				errx(EXIT_FAILURE, "expecting a string for preparing_timeout key");
+		} else if (strcasecmp((char *)key->data.scalar.value, "node_host") == 0) {
+			if (val->type != YAML_SCALAR_NODE)
+				errx(EXIT_FAILURE, "expecting a string for node_host key");
+		} else if (strcasecmp((char *)key->data.scalar.value, "node_port") == 0) {
+			if (val->type != YAML_SCALAR_NODE)
+				errx(EXIT_FAILURE, "expecting a string for node_port key");
+		} else if (strcasecmp((char *)key->data.scalar.value, "local_commands") == 0) {
+			if (val->type != YAML_MAPPING_NODE)
+				errx(EXIT_FAILURE, "expecting a mapping for local commands key");
+		} else if (strcasecmp((char *)key->data.scalar.value, "nodes_commands") == 0) {
+			if (val->type != YAML_MAPPING_NODE)
+				errx(EXIT_FAILURE, "expecting a mapping for nodes commands key");
+		}
+		++pair;
+	}
+}
+
+static void
+parse_conf(void)
+{
+	FILE *fp;
+	yaml_parser_t parser;
+	yaml_document_t doc;
+	yaml_node_t *node;
+
+	if ((fp = fopen("/usr/local/etc/bm.yml", "r")) == NULL)
+		err(EXIT_FAILURE, "fopen()");
+
+	yaml_parser_initialize(&parser);
+	yaml_parser_set_input_file(&parser, fp);
+	yaml_parser_load(&parser, &doc);
+
+	node = yaml_document_get_root_node(&doc);
+	if (node == NULL || node->type != YAML_MAPPING_NODE)
+		err(EXIT_FAILURE, "Invalid configuration format, ignoring the configuration file");
+
+	parse_configuration(&doc, node);
+
+	yaml_document_delete(&doc);
+	yaml_parser_delete(&parser);
+}
 
 static int
 bind_cmd_socket(void)
@@ -114,7 +216,7 @@ main(int argc, char **argv)
 
 	memset(&conf, 0, sizeof(struct bm_conf));
 
-	parse_config("/usr/local/etc/bm.conf");
+	parse_conf();
 	if (conf.cmdsocket == NULL)
 		errx(EXIT_FAILURE, "Command socket not defined");
 	if (conf.datadir ==  NULL)
