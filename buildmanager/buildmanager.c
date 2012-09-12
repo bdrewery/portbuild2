@@ -4,11 +4,15 @@
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 
 #include <ctype.h>
 #include <err.h>
+#include <errno.h>
 #include <netdb.h>
+#include <paths.h>
 #include <signal.h>
+#include <spawn.h>
 #include <stdbool.h>
 #define _WITH_DPRINTF
 #include <stdio.h>
@@ -18,6 +22,8 @@
 
 #include <yaml.h>
 #include <uthash.h>
+
+extern char **environ;
 
 struct bm_conf {
 	char cmdsocket[MAXPATHLEN];
@@ -244,6 +250,10 @@ parse_cmd(char *buf, int fd)
 {
 	struct cmd *c;
 	char *cmd;
+	posix_spawn_file_actions_t action;
+	int error, pstat;
+	pid_t pid;
+	const char *argv[4];
 
 	cmd = buf;
 	while (!isspace(*cmd))
@@ -251,11 +261,32 @@ parse_cmd(char *buf, int fd)
 	cmd[0] = '\0';
 	cmd++;
 	HASH_FIND_STR(local_cmds, buf, c);
-	if (c == NULL)
+	if (c == NULL) {
 		dprintf(fd, "KO");
-	else
-		dprintf(fd, "OK");
-	close(fd);
+		close(fd);
+		return;
+	}
+	argv[0] = "sh";
+	argv[1] = c->script;
+	argv[2] = cmd;
+	argv[3] = NULL;
+
+	posix_spawn_file_actions_init(&action);
+	posix_spawn_file_actions_adddup2(&action, fd, STDOUT_FILENO);
+	posix_spawn_file_actions_adddup2(&action, fd, STDERR_FILENO);
+	posix_spawn_file_actions_addclose(&action, fd);
+
+	if ((error == posix_spawn(&pid, _PATH_BSHELL, &action, NULL,
+	    __DECONST(char **, argv), environ)) != 0) {
+	}
+
+	if (c->background)
+		return;
+
+	while (waitpid(pid, &pstat, 0) == -1) {
+		if (errno != EINTR)
+			return;
+	}
 }
 
 static void
@@ -345,6 +376,11 @@ main(int argc, char **argv)
 						parse_cmd(buf, evlist[i].ident);
 					else
 						parse_node(buf, evlist[i].ident);
+
+					close(fd);
+					EV_SET(&ke, evlist[i].ident, EVFILT_READ, EV_DELETE, 0, 0, 0);
+					kevent(kq, &ke, 1, NULL, 0, NULL);
+					nbevq -= 5;
 					free(buf);
 				}
 			}
