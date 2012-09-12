@@ -5,9 +5,11 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+#include <ctype.h>
 #include <err.h>
 #include <netdb.h>
 #include <signal.h>
+#include <stdbool.h>
 #define _WITH_DPRINTF
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,11 +30,19 @@ struct bm_conf {
 	int nodefd;
 } conf;
 
-struct local_cmd {
+struct cmd {
+	char *name;
+	char *script;
+	bool background;
+	UT_hash_handle hh;
 };
 
-struct node_cmd {
-};
+struct cmd *local_cmds = NULL;
+struct cmd *node_cmds = NULL;
+typedef enum {
+	LOCAL,
+	NODE,
+} cmdtype;
 
 static void
 close_socket(int dummy) {
@@ -42,6 +52,45 @@ close_socket(int dummy) {
 		unlink(conf.cmdsocket);
 
 	exit(EXIT_SUCCESS);
+}
+
+static void
+parse_command(yaml_document_t *doc, yaml_node_t *node, cmdtype t)
+{
+	yaml_node_item_t *item;
+	yaml_node_t *val;
+	struct cmd *c;
+	item = node->data.sequence.items.start;
+	while (item < node->data.sequence.items.top) {
+		yaml_node_pair_t *pair;
+		val = yaml_document_get_node(doc, *item);
+		if (val->type != YAML_MAPPING_NODE)
+			err(EXIT_FAILURE, "Error parsing commands");
+		pair = val->data.mapping.pairs.start;
+		c = calloc(1, sizeof(struct cmd));
+		c->background = false;
+		while (pair < val->data.mapping.pairs.top) {
+			yaml_node_t *key = yaml_document_get_node(doc, pair->key);
+			yaml_node_t *value = yaml_document_get_node(doc, pair->value);
+			if (strcasecmp((char *)key->data.scalar.value, "name") == 0) {
+				c->name = strdup((char *)value->data.scalar.value);
+			} else if (strcasecmp((char *)key->data.scalar.value, "script") == 0) {
+				c->script = strdup((char *)value->data.scalar.value);
+			} else if (strcasecmp((char *)key->data.scalar.value, "background") == 0) {
+				c->background = true;
+			}
+			++pair;
+		}
+		if (c->name != NULL && c->script != NULL) {
+			if (t == LOCAL)
+				HASH_ADD_KEYPTR(hh, local_cmds, c->name, strlen(c->name), c);
+			else
+				HASH_ADD_KEYPTR(hh, node_cmds, c->name, strlen(c->name), c);
+		} else {
+			free(c);
+		}
+		++item;
+	}
 }
 
 static void
@@ -95,11 +144,15 @@ parse_configuration(yaml_document_t *doc, yaml_node_t *node)
 			if (val->type != YAML_SCALAR_NODE)
 				errx(EXIT_FAILURE, "expecting a string for node_port key");
 		} else if (strcasecmp((char *)key->data.scalar.value, "local_commands") == 0) {
-			if (val->type != YAML_MAPPING_NODE)
+			if (val->type != YAML_SEQUENCE_NODE)
 				errx(EXIT_FAILURE, "expecting a mapping for local commands key");
+
+			parse_command(doc, val, LOCAL);
 		} else if (strcasecmp((char *)key->data.scalar.value, "nodes_commands") == 0) {
-			if (val->type != YAML_MAPPING_NODE)
+			if (val->type != YAML_SEQUENCE_NODE)
 				errx(EXIT_FAILURE, "expecting a mapping for nodes commands key");
+
+			parse_command(doc, val, NODE);
 		}
 		++pair;
 	}
@@ -189,8 +242,19 @@ bind_node_socket(void)
 static void
 parse_cmd(char *buf, int fd)
 {
-	printf("Got cmd: %s", buf);
-	dprintf(fd, "OK\n");
+	struct cmd *c;
+	char *cmd;
+
+	cmd = buf;
+	while (!isspace(*cmd))
+		cmd++;
+	cmd[0] = '\0';
+	cmd++;
+	HASH_FIND_STR(local_cmds, buf, c);
+	if (c == NULL)
+		dprintf(fd, "KO");
+	else
+		dprintf(fd, "OK");
 	close(fd);
 }
 
