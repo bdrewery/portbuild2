@@ -1,0 +1,10 @@
+data_dir:       /tmp
+cmd_socket:     /tmp/test.sock
+local_commands:
+  - name: test
+    script: /path/to/test1script.sh
+    background: 1
+
+  - name: test2
+    script: /path/to/test2script.sh
+    background: 1
