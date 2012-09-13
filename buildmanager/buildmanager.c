@@ -100,6 +100,23 @@ parse_command(yaml_document_t *doc, yaml_node_t *node, cmdtype t)
 }
 
 static void
+parse_env(yaml_document_t *doc, yaml_node_t *node)
+{
+	yaml_node_pair_t *pair;
+
+	pair = node->data.mapping.pairs.start;
+	while (pair < node->data.mapping.pairs.top) {
+		yaml_node_t *key = yaml_document_get_node(doc, pair->key);
+		yaml_node_t *val = yaml_document_get_node(doc, pair->value);
+
+		if (val->type != YAML_SCALAR_NODE)
+			errx(EXIT_FAILURE, "wrong environement values");
+		setenv((char *)key->data.scalar.value, (char *)val->data.scalar.value, 0);
+		++pair;
+	}
+}
+
+static void
 parse_configuration(yaml_document_t *doc, yaml_node_t *node)
 {
 	yaml_node_pair_t *pair;
@@ -151,14 +168,19 @@ parse_configuration(yaml_document_t *doc, yaml_node_t *node)
 				errx(EXIT_FAILURE, "expecting a string for node_port key");
 		} else if (strcasecmp((char *)key->data.scalar.value, "local_commands") == 0) {
 			if (val->type != YAML_SEQUENCE_NODE)
-				errx(EXIT_FAILURE, "expecting a mapping for local commands key");
+				errx(EXIT_FAILURE, "expecting a sequence for local commands key");
 
 			parse_command(doc, val, LOCAL);
 		} else if (strcasecmp((char *)key->data.scalar.value, "nodes_commands") == 0) {
 			if (val->type != YAML_SEQUENCE_NODE)
-				errx(EXIT_FAILURE, "expecting a mapping for nodes commands key");
+				errx(EXIT_FAILURE, "expecting a sequence for nodes commands key");
 
 			parse_command(doc, val, NODE);
+		} else if (strcasecmp((char *)key->data.scalar.value, "env") == 0) {
+			if (val->type != YAML_MAPPING_NODE)
+				errx(EXIT_FAILURE, "expecting a mapping for env");
+
+			parse_env(doc, val);
 		}
 		++pair;
 	}
