@@ -1,0 +1,12 @@
+data_dir:       /a/build/
+cmd_socket:     /tmp/test.sock
+local_commands:
+  - name: tunnel
+    script: /home/bapt/portbuild2/scripts/tunnel.sh
+    background: 1
+
+env:
+  PORTBUILD_PATH: /a/portbuild/
+  SCRIPTS_PATH: /home/bapt/portbuild2/scripts
+  DATA_DIR: /a/build/
+  SUPPORTED_ARCHS: amd64 arm i386 ia64 mips powerpc sparc64
