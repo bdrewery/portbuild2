@@ -187,14 +187,14 @@ parse_configuration(yaml_document_t *doc, yaml_node_t *node)
 }
 
 static void
-parse_conf(void)
+parse_conf(char *conffile)
 {
 	FILE *fp;
 	yaml_parser_t parser;
 	yaml_document_t doc;
 	yaml_node_t *node;
 
-	if ((fp = fopen("/usr/local/etc/bm.yml", "r")) == NULL)
+	if ((fp = fopen(conffile, "r")) == NULL)
 		err(EXIT_FAILURE, "fopen()");
 
 	yaml_parser_initialize(&parser);
@@ -209,6 +209,8 @@ parse_conf(void)
 
 	yaml_document_delete(&doc);
 	yaml_parser_delete(&parser);
+
+	fclose(fp);
 }
 
 static int
@@ -333,7 +335,9 @@ main(int argc, char **argv)
 
 	memset(&conf, 0, sizeof(struct bm_conf));
 
-	parse_conf();
+	if (argc != 2)
+		errx(EXIT_FAILURE, "You need to specify the configuration file");
+	parse_conf(argv[1]);
 	if (conf.cmdsocket == NULL)
 		errx(EXIT_FAILURE, "Command socket not defined");
 	if (conf.datadir ==  NULL)
